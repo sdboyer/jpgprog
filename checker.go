@@ -38,39 +38,50 @@ func GetImageResults(body io.ReadCloser) (resultset ImageResultSet, err error) {
 	results := make(chan ImageResult)
 	resultset = make(ImageResultSet)
 
-	urls := doc.Find("img[src$=\".jpg\"]").Map(func(i int, s *goquery.Selection) string {
+	urls := doc.Find("img[src*=\".jpeg\"],img[src*=\".jpg\"]").Map(func(i int, s *goquery.Selection) string {
 		url, _ := s.Attr("src")
 		return url
 	})
 
-	for _, url := range urls {
-      // YAY GO WEIRDNESS
-      url := url
-		resp, err := http.Get(url)
-		if err != nil {
-			return
+	total := len(urls)
+
+	if total > 0 {
+		go ProcessUrlSet(results, urls)
+
+		for i := 0; i < total; i++ {
+			ir := <-results
+			resultset[ir.url] = ir.progressive
 		}
-		jpg := resp.Body
-
-		go func() {
-			defer resp.Body.Close()
-			prog, err := IsJpgProgressive(jpg)
-			if err != nil {
-				return
-			}
-			results <- ImageResult{url, prog}
-		}()
-	}
-
-	for _ = range results {
-		ir := <-results
-		resultset[ir.url] = ir.progressive
 	}
 
 	return resultset, nil
 }
 
+func ProcessUrlSet(result chan<- ImageResult, urls []string) {
+	for _, url := range urls {
+		// YAY GO WEIRDNESS
+		url := url
+
+		go func() {
+			resp, err := http.Get(url)
+			if err != nil {
+				panic(err)
+			}
+			jpg := resp.Body
+			defer resp.Body.Close()
+
+			prog, err := IsJpgProgressive(jpg)
+			if err != nil {
+				panic(err)
+			}
+			result <- ImageResult{url, prog}
+		}()
+	}
+
+}
+
 // Given an io reader, determine if the jpeg represented therein is progressive.
+// Blatantly ripped from the image/jpeg package.
 func IsJpgProgressive(r io.Reader) (bool, error) {
 	var rr Reader
 	if rdr, ok := r.(Reader); ok {
@@ -136,7 +147,7 @@ func IsJpgProgressive(r io.Reader) (bool, error) {
 		}
 
 		if marker == sof0Marker || marker == sof2Marker {
-			return marker == sof2Marker
+			return marker == sof2Marker, nil
 		}
 	}
 }
