@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// A struct representing a result for a single image, and its source URL.
 type ImageResult struct {
 	url         string
 	progressive bool
@@ -17,6 +18,8 @@ type ImageResult struct {
 // A result set for a single URL.
 type ImageResultSet map[string]bool
 
+// Given a string of HTML, searches it for jpg references and determines
+// whether referenced images are progressive or not for all the images.
 func GetImageResults(html string) (result ImageResultSet, err error) {
 	reader := string.NewReader(document)
 
@@ -47,6 +50,8 @@ func GetImageResults(html string) (result ImageResultSet, err error) {
 	return resultset
 }
 
+// Given an io reader (which we assume contains jpeg data), determine if the
+// jpeg represented therein is progressive.
 func IsJpgProgressive(io.ReadCloser) bool {
 	// stub this until i find out how to actually do the check
 	return true
