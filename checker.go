@@ -1,11 +1,11 @@
 package jpgprog
 
 import (
+	"bufio"
 	"github.com/PuerkitoBio/goquery"
 	"image/jpeg"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // A struct representing a result for a single image, and its source URL.
@@ -22,62 +22,86 @@ const (
 	sof2Marker = 0xc2
 )
 
+type Reader interface {
+	io.Reader
+	ReadByte() (c byte, err error)
+}
+
 // Given a string of HTML, searches it for jpg references and determines
 // whether referenced images are progressive or not for all the images.
-func GetImageResults(body io.ReadCloser) (result ImageResultSet, err error) {
-	if doc, e = goquery.NewDocumentFromReader(body); e != nil {
-		panic(e.Error())
+func GetImageResults(body io.ReadCloser) (resultset ImageResultSet, err error) {
+	doc, err := goquery.NewDocumentFromReader(body)
+	if err != nil {
+		return nil, err
 	}
 
 	results := make(chan ImageResult)
+	resultset = make(ImageResultSet)
 
-	images := doc.Find("img[src$=\".jpg\"]").Attr("src")
-	for image := range images {
-		url := image.Val
-		resp := http.Get(Val)
+	urls := doc.Find("img[src$=\".jpg\"]").Map(func(i int, s *goquery.Selection) string {
+		url, _ := s.Attr("src")
+		return url
+	})
+
+	for _, url := range urls {
+      // YAY GO WEIRDNESS
+      url := url
+		resp, err := http.Get(url)
+		if err != nil {
+			return
+		}
 		jpg := resp.Body
 
 		go func() {
 			defer resp.Body.Close()
-			results <- ImageResult{url, IsJpgProgressive(jpg)}
+			prog, err := IsJpgProgressive(jpg)
+			if err != nil {
+				return
+			}
+			results <- ImageResult{url, prog}
 		}()
 	}
 
-	resultset := make(ImageResultSet)
 	for _ = range results {
 		ir := <-results
 		resultset[ir.url] = ir.progressive
 	}
 
-	return resultset
+	return resultset, nil
 }
 
-// Given an io reader (which we assume contains jpeg data), determine if the
-// jpeg represented therein is progressive.
+// Given an io reader, determine if the jpeg represented therein is progressive.
 func IsJpgProgressive(r io.Reader) (bool, error) {
-	var cur [512]byte
+	var rr Reader
+	if rdr, ok := r.(Reader); ok {
+		rr = rdr
+	} else {
+		rr = bufio.NewReader(r)
+	}
+
+	var cur [2]byte
 
 	// process initial SOI marker
-	_, err := io.ReadFull(r, cur[0:2])
+	_, err := io.ReadFull(rr, cur[0:2])
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	if marker[0] != 0xff || marker[1] != 0xd8 {
-		return nil, jpeg.FormatError("missing SOI marker")
+	if cur[0] != 0xff || cur[1] != 0xd8 {
+		return false, jpeg.FormatError("missing SOI marker")
 	}
 
 	// now, scan through the body for a progressive marker
 	for {
-		_, err := io.ReadFull(r, cur[0:2])
+		_, err := io.ReadFull(rr, cur[0:2])
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
 		for cur[0] != 0xff {
 			cur[0] = cur[1]
-			cur[1], err = r.ReadByte()
+			cur[1], err = rr.ReadByte()
 			if err != nil {
-				return nil, err
+				return false, err
 			}
 		}
 		marker := cur[1]
@@ -87,11 +111,15 @@ func IsJpgProgressive(r io.Reader) (bool, error) {
 			continue
 		}
 
+		if marker == 0xd9 {
+			return false, jpeg.UnsupportedError("shouldn't reach EOF.")
+		}
+
 		for marker == 0xff {
 			// spec allows as many fill bytes as desired with val "\xff"
-			marker, err = r.ReadByte()
+			marker, err = rr.ReadByte()
 			if err != nil {
-				return nil, err
+				return false, err
 			}
 		}
 
@@ -100,17 +128,15 @@ func IsJpgProgressive(r io.Reader) (bool, error) {
 			continue
 		}
 
-		// we know we're on a marker that has a length payload - figure
-		// out how long it is (less the 2 bytes for the marker)
-		_, err = io.ReadFull(r, cur[0:2])
+		// we've now covered all the types of markers that do not have a
+		// two-byte length segment, skip that length segment.
+		_, err = io.ReadFull(rr, cur[0:2])
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
-		n := int(cur[0])<<8 + int(cur[1]) - 2
-
 		if marker == sof0Marker || marker == sof2Marker {
-			return marker == sof2marker, nil
+			return marker == sof2Marker
 		}
 	}
 }
