@@ -2,23 +2,23 @@ package main
 
 import (
 	"fmt"
+	"github.com/codegangsta/cli"
 	"github.com/sdboyer/jpgprog/lib"
-    "github.com/codegangsta/cli"
 	"net/http"
-    "os"
+	"os"
 )
 
 func main() {
-  app := cli.NewApp()
-  app.Name = "jpgprog"
-  app.Usage = "Specify a url, and jpegprog will report on whether any jpegs contained therein are progressive."
-  app.Action = func(c *cli.Context) {
-    for _, url := range c.Args() {
-      doFromUrl(url)
-    }
-  }
+	app := cli.NewApp()
+	app.Name = "jpgprog"
+	app.Usage = "Specify a url, and jpegprog will report on whether any jpegs contained therein are progressive."
+	app.Action = func(c *cli.Context) {
+		for _, url := range c.Args() {
+			doFromUrl(url)
+		}
+	}
 
-  app.Run(os.Args)
+	app.Run(os.Args)
 }
 
 func doFromUrl(url string) {
@@ -34,8 +34,7 @@ func doFromUrl(url string) {
 		panic(err)
 	}
 
-    for url, progressive := range results {
-      fmt.Println(progressive, url)
-    }
+	for url, progressive := range results {
+		fmt.Println(progressive, url)
+	}
 }
-
